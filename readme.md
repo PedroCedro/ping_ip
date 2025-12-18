@@ -1,47 +1,62 @@
-# Monitor de Ping em Tempo Real
+# Ping Monitor
 
-Aplicação web simples para monitoramento de ping em tempo real, com:
-- múltiplos IPs
-- status visual (UP / INSTÁVEL / DOWN)
-- gráfico de latência
-- perda de pacotes real
-- nomes amigáveis por host
+Aplicação web para monitoramento de conectividade via ICMP (ping),
+voltada para uso interno em redes corporativas.
 
-## Tecnologias
-- Python
+O sistema permite acompanhar múltiplos hosts em tempo real, exibindo
+latência, perda de pacotes e status visual (UP / INSTÁVEL / DOWN).
+
+---
+
+## Funcionalidades
+
+- Monitoramento de até **60 IPs/hosts**
+- Gráfico de latência em tempo real
+- Status automático:
+  - 🟢 **UP** – sem perda
+  - 🟡 **INSTÁVEL** – perda parcial
+  - 🔴 **DOWN** – perda total
+- Interface com abas
+- Organização manual das abas
+- Remoção dinâmica de hosts
+- Persistência de hosts (nome + IP)
+- Retomada automática do monitoramento após reiniciar o app
+
+---
+
+## Tecnologias utilizadas
+
+- Python 3
 - Flask
 - pythonping
 - Chart.js
 - HTML / CSS / JavaScript
 
-## Como rodar o projeto
+---
+
+## Persistência de Hosts
+
+Os hosts monitorados são armazenados no arquivo `hosts.json`.
+
+Esse arquivo **não é versionado** por conter dados internos da rede.
+Caso não exista, ele será criado automaticamente ao adicionar o primeiro host.
+
+---
+
+## Como executar
 
 ```bash
 # criar ambiente virtual
-
 python -m venv .venv
-source .venv/bin/activate  # Linux/Mac
-.venv\Scripts\activate     # Windows
+
+# ativar (Windows)
+.venv\Scripts\activate
+
+# ativar (Linux / Mac)
+source .venv/bin/activate
 
 # instalar dependências
 pip install -r requirements.txt
 
-# rodar
+# executar
 python app.py
-
-## Configuração de Hosts
-
-Os hosts monitorados são salvos em um arquivo local (`hosts.json`).
-
-Cada host possui:
-- nome amigável
-- IP ou hostname
-
-Exemplo:
-```json
-[
-  { "name": "CLOUDFARE", "ip": "1.1.1.1" },
-  { "name": "GOOGLE DNS1", "ip": "8.8.8.8" },
-  { "name": "GOOGLE DNS2", "ip": "8.8.4.4" }
-]
-
