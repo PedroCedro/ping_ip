@@ -1,0 +1,66 @@
+body {
+    font-family: Arial, sans-serif;
+    margin: 30px;
+}
+
+
+.tab {
+    position: relative;
+    display: inline-block;
+    padding: 8px 28px 8px 12px;
+    /* espaço reservado pro X */
+    margin-right: 6px;
+    cursor: pointer;
+    border-radius: 5px 5px 0 0;
+    color: #fff;
+    font-weight: bold;
+    user-select: none;
+}
+
+.tab .close {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    font-size: 11px;
+    line-height: 11px;
+    width: 14px;
+    height: 14px;
+    text-align: center;
+    border-radius: 3px;
+    color: #fff;
+    opacity: 0.7;
+}
+
+.tab .close:hover {
+    background: rgba(0, 0, 0, 0.2);
+    opacity: 1;
+}
+
+
+.tab.up {
+    background: #4caf50;
+}
+
+.tab.instavel {
+    background: #ff9800;
+}
+
+.tab.down {
+    background: #f44336;
+}
+
+
+.panel {
+    display: none;
+    border: 1px solid #ccc;
+    padding: 10px;
+    height: 400px;
+}
+
+.panel.active {
+    display: block;
+}
+
+.panel canvas {
+    max-height: 100%;
+}
