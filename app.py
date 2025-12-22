@@ -5,18 +5,60 @@ import time
 import json
 import os
 
-
 app = Flask(__name__)
-data = {}
-threads = {}
+
+# =========================
+# GLOBALS
+# =========================
+data = {}          # histórico de ping (runtime)
+threads = {}       # threads por IP
 lock = threading.Lock()
+
 MAX_HOSTS = 60
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HOSTS_FILE = os.path.join(BASE_DIR, 'hosts.json')
 
 
+# =========================
+# HOSTS LOAD / SAVE
+# =========================
+def load_hosts(flat=True):
+    if not os.path.exists(HOSTS_FILE):
+        return [] if flat else {"groups": {}}
+
+    with open(HOSTS_FILE, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+
+    # MODELO ANTIGO → migração automática
+    if isinstance(raw, list):
+        raw = {
+            "groups": {
+                "Geral": {
+                    "order": 1,
+                    "hosts": raw
+                }
+            }          
+        }
+
+    if flat:
+        hosts = []
+        for group in raw["groups"].values():
+            hosts.extend(group["hosts"])
+        return hosts
+
+    return raw
+
+
+def save_hosts(data):
+    with open(HOSTS_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+
+# =========================
+# START SAVED HOSTS
+# =========================
 def start_saved_hosts():
-    hosts = load_hosts()
+    hosts = load_hosts(flat=True)
 
     for h in hosts:
         ip = h["ip"]
@@ -31,18 +73,9 @@ def start_saved_hosts():
             t.start()
 
 
-def load_hosts():
-    if not os.path.exists(HOSTS_FILE):
-        return []
-    with open(HOSTS_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_hosts(hosts):
-    with open(HOSTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(hosts, f, indent=2, ensure_ascii=False)
-
-
+# =========================
+# STATUS
+# =========================
 def calculate_status(history):
     last = history[-3:]
 
@@ -55,16 +88,17 @@ def calculate_status(history):
     return "UP"
 
 
+# =========================
+# MONITOR
+# =========================
 def monitor_ip(ip):
     while True:
         try:
             response = ping(ip, count=5, timeout=1)
-
             latency = response.rtt_avg_ms if response.success() else None
 
             sent = len(response._responses)
             received = sum(1 for r in response._responses if r.success)
-
             loss = 100 * (sent - received) / sent if sent > 0 else 100
 
         except Exception:
@@ -83,15 +117,28 @@ def monitor_ip(ip):
 
             data[ip].append(entry)
             data[ip] = data[ip][-50:]
-
             entry["status"] = calculate_status(data[ip])
 
         time.sleep(2)
 
 
+# =========================
+# ROUTES
+# =========================
 @app.route('/')
 def index():
     return render_template('index.html')
+
+
+@app.route('/hosts')
+def get_hosts():
+    # frontend atual espera lista plana
+    return jsonify(load_hosts(flat=True))
+
+
+@app.route('/hosts/groups')
+def get_hosts_groups():
+    return jsonify(load_hosts(flat=False))
 
 
 @app.route('/add_ip', methods=['POST'])
@@ -103,20 +150,27 @@ def add_ip():
     if not ip:
         return jsonify({"status": "error", "msg": "IP inválido"}), 400
 
-    hosts = load_hosts()
+    config = load_hosts(flat=False)
 
-    if len(hosts) >= MAX_HOSTS and not any(h["ip"] == ip for h in hosts):
+    group = config["groups"].setdefault("Geral", {
+        "order": 1,
+        "hosts": []
+    })
+
+    flat_hosts = load_hosts(flat=True)
+
+    if len(flat_hosts) >= MAX_HOSTS and not any(h["ip"] == ip for h in flat_hosts):
         return jsonify({
             "status": "error",
             "msg": f"Limite máximo de {MAX_HOSTS} IPs atingido"
         }), 400
 
-    if not any(h["ip"] == ip for h in hosts):
-        hosts.append({
+    if not any(h["ip"] == ip for h in flat_hosts):
+        group["hosts"].append({
             "ip": ip,
             "name": name or ip
         })
-        save_hosts(hosts)
+        save_hosts(config)
 
     if ip not in threads:
         t = threading.Thread(
@@ -130,17 +184,6 @@ def add_ip():
     return jsonify({"status": "ok"})
 
 
-@app.route('/data')
-def get_data():
-    with lock:
-        return jsonify(data)
-
-
-@app.route('/hosts')
-def get_hosts():
-    return jsonify(load_hosts())
-
-
 @app.route('/remove_ip', methods=['POST'])
 def remove_ip():
     ip = request.json.get('ip')
@@ -148,12 +191,13 @@ def remove_ip():
     if not ip:
         return jsonify({"status": "error"}), 400
 
-    # remove do arquivo
-    hosts = load_hosts()
-    hosts = [h for h in hosts if h["ip"] != ip]
-    save_hosts(hosts)
+    config = load_hosts(flat=False)
 
-    # remove dados em memória
+    for group in config["groups"].values():
+        group["hosts"] = [h for h in group["hosts"] if h["ip"] != ip]
+
+    save_hosts(config)
+
     with lock:
         data.pop(ip, None)
 
@@ -162,6 +206,56 @@ def remove_ip():
     return jsonify({"status": "ok"})
 
 
+@app.route('/data')
+def get_data():
+    with lock:
+        return jsonify(data)
+
+# Add Grupo
+
+
+@app.route('/groups/add', methods=['POST'])
+def add_group():
+    name = request.json.get('name')
+
+    if not name:
+        return jsonify({"status": "error"}), 400
+
+    data = load_hosts(flat=False)
+
+    if name in data["groups"]:
+        return jsonify({"status": "exists"}), 200
+
+    data["groups"][name] = {
+        "order": len(data["groups"]) + 1,
+        "hosts": []
+    }
+
+    save_hosts(data)
+    return jsonify({"status": "ok"})
+
+# Remove Grupo
+
+
+@app.route('/groups/remove', methods=['POST'])
+def remove_group():
+    name = request.json.get('name')
+
+    if not name:
+        return jsonify({"status": "error"}), 400
+
+    data = load_hosts(flat=False)
+
+    if name in data["groups"]:
+        del data["groups"][name]
+        save_hosts(data)
+
+    return jsonify({"status": "ok"})
+
+
+# =========================
+# MAIN
+# =========================
 if __name__ == '__main__':
     start_saved_hosts()
     app.run(debug=True)

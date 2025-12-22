@@ -2,8 +2,35 @@ let charts = {};
 let names = {};
 let activeIP = null;
 let draggedTab = null;
+let groups = {};
+let activeGroup = null;
 
 const MAX_HOSTS = 60;
+
+// GRUPOS
+async function addGroup() {
+    const input = document.getElementById('groupInput');
+    const name = input.value.trim();
+
+    if (!name || groups[name]) return;
+
+    const res = await fetch('/groups/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name })
+    });
+
+    const json = await res.json();
+    if (json.status !== 'ok') return;
+
+    groups[name] = {
+        order: Object.keys(groups).length + 1,
+        hosts: []
+    };
+
+    input.value = '';
+    renderGroupTabs();
+}
 
 
 async function addHostFromConfig(name, ip) {
@@ -91,9 +118,9 @@ async function addIP() {
     tab.draggable = true;
     tab.onclick = () => activateTab(ip);
 
-    // BOTÃO X
+    // BOTÃO x
     const closeBtn = document.createElement('span');
-    closeBtn.innerText = '✕';
+    closeBtn.innerText = 'x';
     closeBtn.className = 'close';
     closeBtn.onclick = (e) => {
         e.stopPropagation();
@@ -250,16 +277,93 @@ setInterval(updateCharts, 2000);
 // LOAD HOSTS
 // =========================
 async function loadHosts() {
-    const res = await fetch('/hosts');
-    const hosts = await res.json();
+    const res = await fetch('/hosts/groups');
+    const data = await res.json();
 
-    for (const h of hosts) {
-        await addHostFromConfig(h.name, h.ip);
-    }
+    groups = data.groups || {};
+
+    renderGroupTabs();
 }
-
 document.addEventListener('DOMContentLoaded', loadHosts);
 
+// =========================
+// RENDERIZAR ABAS
+// =========================
+function renderGroupTabs() {
+    const container = document.getElementById('group-tabs');
+    container.innerHTML = '';
+
+    for (const groupName in groups) {
+        const tab = document.createElement('div');
+        tab.className = 'tab up';
+        tab.innerText = groupName;
+        tab.onclick = () => activateGroup(groupName);
+
+        const closeBtn = document.createElement('span');
+        closeBtn.className = 'close';
+        closeBtn.innerText = 'x';
+
+        closeBtn.onclick = (e) => {
+            e.stopPropagation();
+            confirmRemoveGroup(groupName);
+        };
+
+        tab.appendChild(closeBtn);
+        container.appendChild(tab);
+    }
+}
+//PERGUNTA ANTES DE EXCLUIR ABAS
+function confirmRemoveGroup(groupName) {
+    const ok = confirm(
+        `Você está prestes a excluir a aba "${groupName}" e suas sub-abas.\n\nDeseja continuar?`
+    );
+
+    if (!ok) return;
+
+    removeGroup(groupName);
+}
+
+//EXCLUIR ABAS
+async function removeGroup(groupName) {
+    await fetch('/groups/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: groupName })
+    });
+
+    delete groups[groupName];
+
+    if (activeGroup === groupName) {
+        activeGroup = null;
+        document.getElementById('tabs').innerHTML = '';
+        document.getElementById('panels').innerHTML = '';
+        document.getElementById('ip-form').style.display = 'none';
+    }
+
+    renderGroupTabs();
+}
+
+
+// =========================
+// ATIVAR ABAS E SUB-ABAS
+// =========================
+function activateGroup(groupName) {
+    activeGroup = groupName;
+
+    charts = {};
+    names = {};
+    activeIP = null;
+
+    document.getElementById('tabs').innerHTML = '';
+    document.getElementById('panels').innerHTML = '';
+
+    document.getElementById('ip-form').style.display = 'block';
+
+    const hosts = groups[groupName].hosts || [];
+    for (const h of hosts) {
+        addHostFromConfig(h.name, h.ip);
+    }
+}
 
 // ENTER = ADD
 document.getElementById('ipInput').addEventListener('keydown', e => {
