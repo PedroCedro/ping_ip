@@ -37,7 +37,7 @@ def load_hosts(flat=True):
                     "order": 1,
                     "hosts": raw
                 }
-            }          
+            }
         }
 
     if flat:
@@ -146,17 +146,17 @@ def add_ip():
     payload = request.json
     ip = payload.get('ip')
     name = payload.get('name')
+    group_name = payload.get('group')
 
-    if not ip:
-        return jsonify({"status": "error", "msg": "IP inválido"}), 400
+    if not ip or not group_name:
+        return jsonify({"status": "error"}), 400
 
     config = load_hosts(flat=False)
 
-    group = config["groups"].setdefault("Geral", {
-        "order": 1,
-        "hosts": []
-    })
+    if group_name not in config["groups"]:
+        return jsonify({"status": "group_not_found"}), 400
 
+    # lista plana para validações
     flat_hosts = load_hosts(flat=True)
 
     if len(flat_hosts) >= MAX_HOSTS and not any(h["ip"] == ip for h in flat_hosts):
@@ -165,13 +165,16 @@ def add_ip():
             "msg": f"Limite máximo de {MAX_HOSTS} IPs atingido"
         }), 400
 
-    if not any(h["ip"] == ip for h in flat_hosts):
+    group = config["groups"][group_name]
+
+    if not any(h["ip"] == ip for h in group["hosts"]):
         group["hosts"].append({
             "ip": ip,
             "name": name or ip
         })
         save_hosts(config)
 
+    # inicia monitoramento
     if ip not in threads:
         t = threading.Thread(
             target=monitor_ip,
