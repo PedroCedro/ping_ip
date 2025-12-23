@@ -12,25 +12,21 @@
 <body>
     <h2>Monitor de Ping em Tempo Real</h2>
 
-    <!-- Criar grupo -->
     <input type="text" id="groupInput" placeholder="Nome do grupo (ex: Caixas)">
     <button onclick="addGroup()">Criar Grupo</button>
 
     <hr>
 
-    <!-- Criar IP (só aparece quando grupo ativo) -->
     <div id="ip-form" style="display:none;">
         <input type="text" id="nameInput" placeholder="Nome (ex: CX 01)">
         <input type="text" id="ipInput" placeholder="IP ou host">
         <button onclick="addIP()">Adicionar IP</button>
     </div>
 
-    <!-- Abas -->
     <div id="group-tabs"></div>
     <div id="tabs"></div>
     <div id="panels"></div>
 
-    <!-- JS SEMPRE NO FINAL -->
     <script src="{{ url_for('static', filename='js/monitor.js') }}"></script>
 </body>
 

@@ -1,96 +1,60 @@
-from flask import Flask, render_template, jsonify, request
+from flask import Flask, render_template, jsonify, request, g
 from pythonping import ping
 import threading
 import time
-import json
+import sqlite3
 import os
 
 app = Flask(__name__)
 
 # =========================
-# GLOBALS
+# CONFIG
 # =========================
-data = {}          # histórico de ping (runtime)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "data", "ping_monitor.db")
+
+MAX_HOSTS = 60
+
+# =========================
+# RUNTIME STATE
+# =========================
+data = {}          # histórico de ping (em memória)
 threads = {}       # threads por IP
 lock = threading.Lock()
 
-MAX_HOSTS = 60
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-HOSTS_FILE = os.path.join(BASE_DIR, 'hosts.json')
+# =========================
+# DB
+# =========================
 
+
+def get_db():
+    if "db" not in g:
+        g.db = sqlite3.connect(DB_PATH)
+        g.db.row_factory = sqlite3.Row
+    return g.db
+
+
+@app.teardown_appcontext
+def close_db(exception=None):
+    db = g.pop("db", None)
+    if db:
+        db.close()
 
 # =========================
-# HOSTS LOAD / SAVE
+# MONITOR
 # =========================
-def load_hosts(flat=True):
-    if not os.path.exists(HOSTS_FILE):
-        return [] if flat else {"groups": {}}
-
-    with open(HOSTS_FILE, "r", encoding="utf-8") as f:
-        raw = json.load(f)
-
-    # MODELO ANTIGO → migração automática
-    if isinstance(raw, list):
-        raw = {
-            "groups": {
-                "Geral": {
-                    "order": 1,
-                    "hosts": raw
-                }
-            }
-        }
-
-    if flat:
-        hosts = []
-        for group in raw["groups"].values():
-            hosts.extend(group["hosts"])
-        return hosts
-
-    return raw
 
 
-def save_hosts(data):
-    with open(HOSTS_FILE, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-# =========================
-# START SAVED HOSTS
-# =========================
-def start_saved_hosts():
-    hosts = load_hosts(flat=True)
-
-    for h in hosts:
-        ip = h["ip"]
-
-        if ip not in threads:
-            t = threading.Thread(
-                target=monitor_ip,
-                args=(ip,),
-                daemon=True
-            )
-            threads[ip] = t
-            t.start()
-
-
-# =========================
-# STATUS
-# =========================
 def calculate_status(history):
     last = history[-3:]
 
     if any(h["loss"] == 100 for h in last):
         return "DOWN"
-
     if any(h["loss"] > 0 for h in last):
         return "INSTAVEL"
-
     return "UP"
 
 
-# =========================
-# MONITOR
-# =========================
 def monitor_ip(ip):
     while True:
         try:
@@ -121,60 +85,110 @@ def monitor_ip(ip):
 
         time.sleep(2)
 
+# =========================
+# START SAVED HOSTS
+# =========================
+
+
+def start_saved_hosts():
+    db = sqlite3.connect(DB_PATH)
+    cur = db.execute("SELECT host FROM hosts WHERE active = 1")
+    hosts = [row["host"] for row in cur.fetchall()]
+    db.close()
+
+    for ip in hosts:
+        if ip not in threads:
+            t = threading.Thread(
+                target=monitor_ip,
+                args=(ip,),
+                daemon=True
+            )
+            threads[ip] = t
+            t.start()
 
 # =========================
 # ROUTES
 # =========================
-@app.route('/')
+
+
+@app.route("/")
 def index():
-    return render_template('index.html')
+    return render_template("index.html")
+
+# -------- GROUPS --------
 
 
-@app.route('/hosts')
-def get_hosts():
-    # frontend atual espera lista plana
-    return jsonify(load_hosts(flat=True))
+@app.route("/hosts/groups")
+def get_groups():
+    db = get_db()
+    cur = db.execute("""
+        SELECT group_name, host, label
+        FROM hosts
+        WHERE active = 1
+        ORDER BY group_name
+    """)
+
+    groups = {}
+    for row in cur.fetchall():
+        groups.setdefault(row["group_name"], []).append({
+            "ip": row["host"],
+            "name": row["label"]
+        })
+
+    return jsonify({"groups": groups})
 
 
-@app.route('/hosts/groups')
-def get_hosts_groups():
-    return jsonify(load_hosts(flat=False))
+@app.route("/groups/add", methods=["POST"])
+def add_group():
+    name = request.json.get("name")
+    if not name:
+        return jsonify({"status": "error"}), 400
+    return jsonify({"status": "ok"})
 
 
-@app.route('/add_ip', methods=['POST'])
-def add_ip():
-    payload = request.json
-    ip = payload.get('ip')
-    name = payload.get('name')
-    group_name = payload.get('group')
-
-    if not ip or not group_name:
+@app.route("/groups/remove", methods=["POST"])
+def remove_group():
+    name = request.json.get("name")
+    if not name:
         return jsonify({"status": "error"}), 400
 
-    config = load_hosts(flat=False)
+    db = get_db()
+    db.execute("DELETE FROM hosts WHERE group_name = ?", (name,))
+    db.commit()
 
-    if group_name not in config["groups"]:
-        return jsonify({"status": "group_not_found"}), 400
+    return jsonify({"status": "ok"})
 
-    # lista plana para validações
-    flat_hosts = load_hosts(flat=True)
+# -------- HOSTS --------
 
-    if len(flat_hosts) >= MAX_HOSTS and not any(h["ip"] == ip for h in flat_hosts):
+
+@app.route("/add_ip", methods=["POST"])
+def add_ip():
+    payload = request.json
+    ip = payload.get("ip")
+    name = payload.get("name")
+    group = payload.get("group")
+
+    if not ip or not group:
+        return jsonify({"status": "error"}), 400
+
+    db = get_db()
+
+    cur = db.execute("SELECT COUNT(*) FROM hosts WHERE active = 1")
+    total = cur.fetchone()[0]
+
+    if total >= MAX_HOSTS:
         return jsonify({
             "status": "error",
             "msg": f"Limite máximo de {MAX_HOSTS} IPs atingido"
         }), 400
 
-    group = config["groups"][group_name]
+    db.execute("""
+        INSERT INTO hosts (group_name, host, label)
+        VALUES (?, ?, ?)
+    """, (group, ip, name or ip))
 
-    if not any(h["ip"] == ip for h in group["hosts"]):
-        group["hosts"].append({
-            "ip": ip,
-            "name": name or ip
-        })
-        save_hosts(config)
+    db.commit()
 
-    # inicia monitoramento
     if ip not in threads:
         t = threading.Thread(
             target=monitor_ip,
@@ -187,19 +201,15 @@ def add_ip():
     return jsonify({"status": "ok"})
 
 
-@app.route('/remove_ip', methods=['POST'])
+@app.route("/remove_ip", methods=["POST"])
 def remove_ip():
-    ip = request.json.get('ip')
-
+    ip = request.json.get("ip")
     if not ip:
         return jsonify({"status": "error"}), 400
 
-    config = load_hosts(flat=False)
-
-    for group in config["groups"].values():
-        group["hosts"] = [h for h in group["hosts"] if h["ip"] != ip]
-
-    save_hosts(config)
+    db = get_db()
+    db.execute("DELETE FROM hosts WHERE host = ?", (ip,))
+    db.commit()
 
     with lock:
         data.pop(ip, None)
@@ -208,57 +218,18 @@ def remove_ip():
 
     return jsonify({"status": "ok"})
 
+# -------- DATA --------
 
-@app.route('/data')
+
+@app.route("/data")
 def get_data():
     with lock:
         return jsonify(data)
-
-# Add Grupo
-
-
-@app.route('/groups/add', methods=['POST'])
-def add_group():
-    name = request.json.get('name')
-
-    if not name:
-        return jsonify({"status": "error"}), 400
-
-    data = load_hosts(flat=False)
-
-    if name in data["groups"]:
-        return jsonify({"status": "exists"}), 200
-
-    data["groups"][name] = {
-        "order": len(data["groups"]) + 1,
-        "hosts": []
-    }
-
-    save_hosts(data)
-    return jsonify({"status": "ok"})
-
-# Remove Grupo
-
-
-@app.route('/groups/remove', methods=['POST'])
-def remove_group():
-    name = request.json.get('name')
-
-    if not name:
-        return jsonify({"status": "error"}), 400
-
-    data = load_hosts(flat=False)
-
-    if name in data["groups"]:
-        del data["groups"][name]
-        save_hosts(data)
-
-    return jsonify({"status": "ok"})
 
 
 # =========================
 # MAIN
 # =========================
-if __name__ == '__main__':
+if __name__ == "__main__":
     start_saved_hosts()
     app.run(debug=True)
