@@ -7,8 +7,7 @@ import threading
 import time
 import sqlite3
 import os
-import secrets
-
+# import secrets
 
 
 app = Flask(__name__)
@@ -25,13 +24,16 @@ MAX_HOSTS = 60
 # =========================
 # RUNTIME STATE
 # =========================
-data = {}          # histórico de ping (em memória)
-threads = {}       # threads por IP
+data = {}
+
+threads = {}
+
 lock = threading.Lock()
 
 # =========================
 # LOGIN
 # =========================
+
 
 def login_required(role=None):
     def wrapper(fn):
@@ -48,6 +50,8 @@ def login_required(role=None):
 # =========================
 # LOGS AUTOMATIZADOS
 # =========================
+
+
 def log_action(action, target=None):
     try:
         user = session.get("user")
@@ -130,12 +134,18 @@ def monitor_ip(ip):
 
 
 def start_saved_hosts():
+    print("🔄 Carregando hosts do banco...")
     db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
     cur = db.execute("SELECT host FROM hosts WHERE active = 1")
-    hosts = [row["host"] for row in cur.fetchall()]
+    rows = cur.fetchall()
+    print("Hosts encontrados:", [row["host"] for row in rows])
     db.close()
 
-    for ip in hosts:
+    for row in rows:
+        ip = row["host"]
+        print("▶ Iniciando monitor para:", ip)
+
         if ip not in threads:
             t = threading.Thread(
                 target=monitor_ip,
@@ -144,6 +154,7 @@ def start_saved_hosts():
             )
             threads[ip] = t
             t.start()
+
 
 # =========================
 # ROUTES
@@ -255,6 +266,7 @@ def remove_ip():
 
 @app.route("/data")
 def get_data():
+    print("DATA KEYS:", list(data.keys()))
     with lock:
         return jsonify(data)
 
@@ -301,9 +313,40 @@ def index():
     return render_template("index.html")
 
 
+@app.route("/users", methods=["GET", "POST"])
+@login_required(role="admin")
+def users():
+    db = get_db()
+
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+        role = request.form.get("role")
+
+        if not username or not password or not role:
+            return "Dados inválidos", 400
+
+        password_hash = generate_password_hash(password)
+
+        db.execute("""
+            INSERT INTO users (username, password_hash, role)
+            VALUES (?, ?, ?)
+        """, (username, password_hash, role))
+        db.commit()
+
+        log_action("CREATE_USER", username)
+
+        return redirect(url_for("users"))
+
+    cur = db.execute("SELECT username, role, active FROM users")
+    users = cur.fetchall()
+
+    return render_template("users.html", users=users)
+
+
 # =========================
 # MAIN
 # =========================
 if __name__ == "__main__":
     start_saved_hosts()
-    app.run(debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)

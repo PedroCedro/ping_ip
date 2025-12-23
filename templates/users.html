@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <title>Usuários</title>
+</head>
+
+<body>
+    <h2>Usuários</h2>
+
+    <form method="post">
+        <input name="username" placeholder="Usuário" required>
+        <input name="password" type="password" placeholder="Senha" required>
+        <select name="role">
+            <option value="user">Usuário</option>
+            <option value="admin">Admin</option>
+        </select>
+        <button type="submit">Criar</button>
+    </form>
+
+    <hr>
+
+    <table border="1" cellpadding="5">
+        <tr>
+            <th>Usuário</th>
+            <th>Role</th>
+            <th>Ativo</th>
+        </tr>
+        {% for u in users %}
+        <tr>
+            <td>{{ u.username }}</td>
+            <td>{{ u.role }}</td>
+            <td>{{ u.active }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <p><a href="/">Voltar</a></p>
+</body>
+
+</html>
