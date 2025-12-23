@@ -1,11 +1,18 @@
 from flask import Flask, render_template, jsonify, request, g
+from flask import session, redirect, url_for, abort
+from functools import wraps
 from pythonping import ping
+from werkzeug.security import generate_password_hash, check_password_hash
 import threading
 import time
 import sqlite3
 import os
+import secrets
+
+
 
 app = Flask(__name__)
+app.secret_key = "nz1zbil0039bm7tgs73dh260k7fvnv53"
 
 # =========================
 # CONFIG
@@ -21,6 +28,38 @@ MAX_HOSTS = 60
 data = {}          # histórico de ping (em memória)
 threads = {}       # threads por IP
 lock = threading.Lock()
+
+# =========================
+# LOGIN
+# =========================
+
+def login_required(role=None):
+    def wrapper(fn):
+        @wraps(fn)
+        def decorated(*args, **kwargs):
+            if "user" not in session:
+                return redirect(url_for("login"))
+            if role and session.get("role") != role:
+                abort(403)
+            return fn(*args, **kwargs)
+        return decorated
+    return wrapper
+
+# =========================
+# LOGS AUTOMATIZADOS
+# =========================
+def log_action(action, target=None):
+    try:
+        user = session.get("user")
+        db = get_db()
+        db.execute(
+            "INSERT INTO logs (user, action, target) VALUES (?, ?, ?)",
+            (user, action, target)
+        )
+        db.commit()
+    except Exception:
+        pass
+
 
 # =========================
 # DB
@@ -110,14 +149,7 @@ def start_saved_hosts():
 # ROUTES
 # =========================
 
-
-@app.route("/")
-def index():
-    return render_template("index.html")
-
 # -------- GROUPS --------
-
-
 @app.route("/hosts/groups")
 def get_groups():
     db = get_db()
@@ -225,6 +257,48 @@ def remove_ip():
 def get_data():
     with lock:
         return jsonify(data)
+
+
+# -------- LOGIN/LOGOUT --------
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if request.method == "POST":
+        username = request.form.get("username")
+        password = request.form.get("password")
+
+        db = get_db()
+        cur = db.execute(
+            "SELECT username, password_hash, role FROM users WHERE username = ? AND active = 1",
+            (username,)
+        )
+        user = cur.fetchone()
+
+        if user and check_password_hash(user["password_hash"], password):
+            session["user"] = user["username"]
+            session["role"] = user["role"]
+            log_action("LOGIN", user["username"])
+            return redirect(url_for("index"))
+
+        return render_template("login.html", error="Usuário ou senha inválidos")
+
+    return render_template("login.html")
+
+
+@app.route("/logout")
+def logout():
+    if "user" in session:
+        log_action("LOGOUT", session["user"])
+    session.clear()
+    return redirect(url_for("login"))
+
+# -------- APP PROTEGIDO --------
+
+
+@app.route("/")
+@login_required()
+def index():
+    return render_template("index.html")
 
 
 # =========================
