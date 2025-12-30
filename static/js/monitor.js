@@ -35,7 +35,7 @@ async function addGroup() {
     const json = await res.json();
     if (json.status !== 'ok') return;
 
-    groups[name] = { hosts: [] };
+    groups[name] = [];
     input.value = '';
     renderGroupTabs();
 }
@@ -74,7 +74,7 @@ function activateGroup(groupName) {
     document.getElementById('panels').innerHTML = '';
     document.getElementById('ip-form').style.display = 'block';
 
-    for (const h of groups[groupName].hosts || []) {
+    for (const h of groups[groupName] || []) {
         addHostFromConfig(h.name, h.ip);
     }
 }
@@ -117,7 +117,7 @@ async function addIP() {
         body: JSON.stringify({ ip, name: name || ip, group: activeGroup })
     });
 
-    groups[activeGroup].hosts.push({ ip, name: name || ip });
+    groups[activeGroup].push({ ip, name: name || ip });
     addHostFromConfig(name || ip, ip);
 }
 
@@ -128,9 +128,10 @@ async function removeIP(ip) {
     delete charts[ip];
     delete names[ip];
 
-    for (const g of Object.values(groups)) {
-        g.hosts = g.hosts.filter(h => h.ip !== ip);
+    for (const groupName in groups) {
+        groups[groupName] = groups[groupName].filter(h => h.ip !== ip);
     }
+
 
     await fetch('/remove_ip', {
         method: 'POST',
@@ -169,11 +170,20 @@ function addHostFromConfig(name, ip) {
     panel.appendChild(canvas);
     document.getElementById('panels').appendChild(panel);
 
-    charts[ip] = new Chart(canvas, {
-        type: 'line',
-        data: { labels: [], datasets: [{ data: [] }] },
-        options: { responsive: true }
-    });
+charts[ip] = new Chart(canvas, {
+    type: 'line',
+    data: { labels: [], datasets: [{ data: [] }] },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        layout: {
+            padding: {
+                bottom: 35
+            }
+        }
+    }
+});
+
 
     activateTab(ip);
 }
