@@ -3,10 +3,15 @@ from flask import session, redirect, url_for, abort
 from functools import wraps
 from pythonping import ping
 from werkzeug.security import generate_password_hash, check_password_hash
+import pystray
+from pystray import MenuItem as item
+from PIL import Image
+import webbrowser
 import threading
 import time
 import sqlite3
 import os
+import sys
 # import secrets
 
 
@@ -16,10 +21,41 @@ app.secret_key = "nz1zbil0039bm7tgs73dh260k7fvnv53"
 # =========================
 # CONFIG
 # =========================
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+
+def get_base_dir():
+    if hasattr(sys, '_MEIPASS'):
+        return os.path.dirname(sys.executable)  # pasta do .exe
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+# CONFIG NO .EXE
+BASE_DIR = get_base_dir()
 DB_PATH = os.path.join(BASE_DIR, "data", "ping_monitor.db")
 
+# CONFIG EM DEV
+# BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# DB_PATH = os.path.join(BASE_DIR, "data", "ping_monitor.db")
+
 MAX_HOSTS = 60
+
+# =========================
+# SYSTRAY ICON
+# =========================
+
+
+def on_exit(icon, item):
+    icon.stop()
+    os._exit(0)
+
+
+def create_tray_icon():
+    icon_image = Image.new('RGB', (64, 64), color=(0, 128, 0))  # verde padrão
+    menu = (item('Abrir', lambda: webbrowser.open("http://127.0.0.1:5000")),
+            item('Sair', on_exit))
+    icon = pystray.Icon("PingMonitor", icon_image, "Ping Monitor", menu)
+    icon.run()
+
 
 # =========================
 # RUNTIME STATE
@@ -347,6 +383,20 @@ def users():
 # =========================
 # MAIN
 # =========================
+
+def open_browser():
+    time.sleep(1.5)
+    webbrowser.open("http://127.0.0.1:5000")
+
+# if __name__ == "__main__":
+#    start_saved_hosts()
+#    app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
+
+
 if __name__ == "__main__":
     start_saved_hosts()
+
+    threading.Thread(target=open_browser, daemon=True).start()
+    threading.Thread(target=create_tray_icon, daemon=True).start()
+
     app.run(host="0.0.0.0", port=5000, debug=False, use_reloader=False)
